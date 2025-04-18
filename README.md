@@ -41,6 +41,3 @@ Always review and test scripts in a safe environment before deploying them in pr
 ---
 
 Happy scripting!
-
----
-Answer from Perplexity: pplx.ai/share
