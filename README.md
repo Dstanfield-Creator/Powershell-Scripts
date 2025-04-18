@@ -1,7 +1,3 @@
-Certainly! Here’s the revised version without the Markdown and Jekyll sections:
-
----
-
 ## Welcome to the PowerShell Scripts Repository
 
 This repository is dedicated to sharing useful PowerShell scripts and resources that can help automate, manage, and streamline a wide range of tasks on Windows and other platforms. Whether you’re an IT professional, system administrator, or enthusiast, you’ll find tools here to make your workflow more efficient.
