@@ -1,0 +1,1090 @@
+<#
+.DESCRIPTION
+    This PowerShell script provides a graphical user interface (GUI) to streamline and automate common Active Directory (AD) administrative tasks. 
+    It is designed to reduce the time and effort required for repetitive operations such as:
+    - Mirroring AD account group memberships.
+    - Adding multiple groups to multiple user accounts.
+    - Updating user attributes (e.g., last name).
+    - Managing account states (e.g., unarchiving accounts).
+    - Assigning Microsoft Teams phone numbers.
+    - Removing users from all groups.
+    - Deleting computer objects from AD.
+
+    The script leverages Windows Forms for the GUI and integrates with the Active Directory and Microsoft Teams PowerShell modules.
+
+.LICENSE
+    Written by Danny Stanfield
+    Copyright (C) 2025 - Danny Stanfield
+    All rights reserved.
+
+.NOTES
+    Changelog:
+    v1.00:
+        - Initial release with the following features:
+            - "Add Groups to User" tab for bulk group assignments.
+            - "Mirror AD Account" tab for replicating group memberships.
+        - Additional tabs for managing user attributes, account states, and Teams phone numbers.
+        - Error handling and logging for improved troubleshooting.
+
+    Requirements:
+    - Active Directory PowerShell Module.
+    - Microsoft Teams PowerShell Module.
+    - Administrative privileges for AD and Teams operations.
+    - .NET Framework for Windows Forms.
+
+    Usage:
+    - Run the script with appropriate permissions.
+    - Ensure required modules are installed and imported.
+    - Follow on-screen prompts and instructions for each operation.
+
+    Disclaimer:
+    - Use this script at your own risk. Ensure proper testing in a non-production environment before deployment.
+    - The author is not responsible for any unintended consequences resulting from the use of this script.
+#>
+
+#This function runs when the script is executed, and if the application loads successfully, returns true
+function OnApplicationLoad { return $true }
+
+#This function runs when the script is closed. It will terminate the Exchange Connection and exit cleanly
+function OnApplicationExit 
+{
+    $script:ExitCode = 0 
+}
+
+function MirrorADAccount
+{
+    ###### Location where the log file is stored and written to ######
+    $logFileLocation                 = 'C:\Windows\Temp\DSTLogFile.txt'
+    ###################################################################
+
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName Microsoft.VisualBasic
+    Add-Type -AssemblyName PresentationCore,PresentationFramework
+    Add-Type -Assembly System.Drawing 
+    [System.Windows.Forms.Application]::EnableVisualStyles()
+    Import-Module ActiveDirectory
+
+    $frmMain                         = New-Object system.Windows.Forms.Form
+    $frmMain.ClientSize              = New-Object System.Drawing.Point(795,630)
+    $frmMain.text                    = "Danny's Quick AD Tools"
+    $frmMain.FormBorderStyle         = 'FixedSingle'
+    $frmMain.MaximizeBox             = $false
+    $frmMain.StartPosition           = 'CenterScreen'
+
+    $tabControl1                     = New-Object System.Windows.Forms.TabControl
+    $tabControl1.location            = New-Object System.Drawing.Point(10,70)
+    $tabControl1.width               = 775
+    $tabControl1.height              = 550
+
+    $lblTitle                        = New-Object system.Windows.Forms.Label
+    $lblTitle.Text                   = "Danny's  Quick  AD  Tools"
+    $lblTitle.location               = New-Object System.Drawing.Point(5,10)
+    $lblTitle.width                  = 775
+    $lblTitle.height                 = 80
+    $lblTitle.Font                   = New-Object System.Drawing.Font("Lucida Handwriting",32)
+    #Variable used to determine if object to be validated is a group or a user
+    $objType
+    #region  ============= Form to display after clicking Execute ===============
+    $frmOutput                       = New-Object System.Windows.Forms.Form
+    $frmOutput.ClientSize            = New-Object System.Drawing.Point(500,290)                      
+    $frmOutput.text                  = "Result"
+    $frmOutput.FormBorderStyle       = 'FixedSingle'
+    $frmOutput.MaximizeBox           = $false
+    $frmOutput.StartPosition         = 'CenterScreen'
+
+    $btnSaveToFile                   = New-Object System.Windows.Forms.Button
+    $btnSaveToFile.width             = 78    
+    $btnSaveToFile.height            = 30
+    $btnSaveToFile.text              = "Save to File"
+    $btnSaveToFile.location          = New-Object System.Drawing.Point(5,255)
+
+    $btnClose                        = New-Object System.Windows.Forms.Button
+    $btnClose.width                  = 78
+    $btnClose.height                 = 30
+    $btnClose.text                   = "Close"
+    $btnClose.location               = New-Object System.Drawing.Point(420,255)
+
+    $grvwResult                      = New-Object System.Windows.Forms.DataGridView
+    $grvwResult.location             = New-Object System.Drawing.Point(5,5)
+    $grvwResult.width                = 490
+    $grvwResult.height               = 250
+    $grvwResult.RowHeadersVisible    = $false
+
+    $dataTable                       = New-Object System.Data.DataTable "DataTable"
+    $grvwResult.DataSource           = $dataTable
+    $dataTable.Columns.Add("User ID")
+    $dataTable.Columns.Add("Group")
+    $dataTable.Columns.Add("Success")
+    $dataTable.Columns.Add("Error Reason")
+    #endregion  ============= Form to display after clicking Execute ===============
+    #Add Tabed Pages Here=========================================================================================
+    #region TabPage1 -----------------------------------------------------------------
+    $tabPage1                      = New-Object System.Windows.Forms.TabPage
+    $tabPage1.Text                 = "Add Groups to User"
+
+    $btnT1EnterManual              = New-Object system.Windows.Forms.Button
+    $btnT1EnterManual.text         = "Enter AD Groups Manually"
+    $btnT1EnterManual.width        = 120
+    $btnT1EnterManual.height       = 35
+    $btnT1EnterManual.location     = New-Object System.Drawing.Point(10,25)
+
+    $btnT1LoadGroups               = New-Object system.Windows.Forms.Button
+    $btnT1LoadGroups.text          = "Load Groups By UserID"
+    $btnT1LoadGroups.width         = 120
+    $btnT1LoadGroups.height        = 35
+    $btnT1LoadGroups.location      = New-Object System.Drawing.Point(140,25)
+
+    $btnT1LoadFromFile             = New-Object System.Windows.Forms.Button
+    $btnT1LoadFromFile.width       = 120
+    $btnT1LoadFromFile.height      = 35
+    $btnT1LoadFromFile.text        = "Load Groups From File"
+    $btnT1LoadFromFile.location    = New-Object System.Drawing.Point(270,25)
+
+    $btnT1Reset                    = New-Object System.Windows.Forms.Button
+    $btnT1Reset.text               = "Reset"
+    $btnT1Reset.width              = 60
+    $btnT1Reset.height             = 30
+    $btnT1Reset.location           = New-Object System.Drawing.Point(10,475)
+
+    $lstT1Groups                   = New-Object System.Windows.Forms.ListBox
+    $lstT1Groups.location          = New-Object System.Drawing.Point(10,80)
+    $lstT1Groups.width             = 500
+    $lstT1Groups.height            = 400
+
+    $lblT1SpecifyUsers             = New-Object system.Windows.Forms.Label
+    $lblT1SpecifyUsers.Text        = "Enter the users to add the groups, then click Add"
+    $lblT1SpecifyUsers.location    = New-Object System.Drawing.Point(510,5)
+    $lblT1SpecifyUsers.width       = 270
+
+    $txtT1Users                    = New-Object System.Windows.Forms.TextBox
+    $txtT1Users.location           = New-Object System.Drawing.Point(550,35)
+    $txtT1Users.width              = 90
+
+    $btnT1AddToList                = New-Object System.Windows.Forms.Button
+    $btnT1AddToList.text           = "Add"
+    $btnT1AddToList.width          = 50
+    $btnT1AddToList.height         = 30
+    $btnT1AddToList.location       = New-Object System.Drawing.Point(650,30)
+
+    $lstT1Users                    = New-Object System.Windows.Forms.ListBox      
+    $lstT1Users.location           = New-Object System.Drawing.Point(550,80) 
+    $lstT1Users.width              = 150
+    $lstT1Users.height             = 350
+
+    $btnT1AddGroups                = New-Object System.Windows.Forms.Button
+    $btnT1AddGroups.text           = "Execute"
+    $btnT1AddGroups.width          = 100
+    $btnT1AddGroups.height         = 35
+    $btnT1AddGroups.location       = New-Object System.Drawing.Point(575,430)
+    #endregion TabPage1 -----------------------------------------------------------------
+
+    #region TabPage2    -+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-
+    $tabPage2                      = New-Object System.Windows.Forms.TabPage
+    $tabPage2.Text                 = "Mirror AD Account"
+
+    $btnT2Start                    = New-Object system.Windows.Forms.Button
+    $btnT2Start.text               = "Go"
+    $btnT2Start.width              = 39
+    $btnT2Start.height             = 30
+    $btnT2Start.location           = New-Object System.Drawing.Point(363,300)
+
+    $btnT2Clear                    = New-Object System.Windows.Forms.Button
+    $btnT2Clear.text               = "Clear"
+    $btnT2Clear.width              = 39
+    $btnT2Clear.height             = 30
+    $btnT2Clear.location           = New-Object System.Drawing.Point(363,345)
+
+    $btnT2Add                      = New-Object system.Windows.Forms.Button
+    $btnT2Add.text                 = ">"
+    $btnT2Add.width                = 39
+    $btnT2Add.height               = 30
+    $btnT2Add.location             = New-Object System.Drawing.Point(363,223)
+
+    $btnT2Remove                   = New-Object system.Windows.Forms.Button
+    $btnT2Remove.text              = "<"
+    $btnT2Remove.width             = 39
+    $btnT2Remove.height            = 30
+    $btnT2Remove.location          = New-Object System.Drawing.Point(363,255)
+
+    $lblT2User1                    = New-Object system.Windows.Forms.Label
+    $lblT2User1.Text               = "Enter UserID to mirror from:"
+    $lblT2User1.location           = New-Object System.Drawing.Point(110,10)
+    $lblT2User1.width              = 180
+
+    $txtT2User1                    = New-Object System.Windows.Forms.TextBox
+    $txtT2User1.location           = New-Object System.Drawing.Point(120,30)
+    $txtT2User1.width              = 120
+    $txtT2User1.height             = 35
+
+    $btnT2LoadGroups               = New-Object System.Windows.Forms.Button
+    $btnT2LoadGroups.text          = "Load Groups"
+    $btnT2LoadGroups.width         = 60
+    $btnT2LoadGroups.height        = 30
+    $btnT2LoadGroups.location      = New-Object System.Drawing.Point(10,35)
+
+    $lstT2User1                    = New-Object System.Windows.Forms.ListBox      
+    $lstT2User1.location           = New-Object System.Drawing.Point(10,70) 
+    $lstT2User1.width              = 350
+    $lstT2User1.height             = 450
+    $lstT2User1.SelectionMode = "MultiExtended"
+
+    $lblUser2                      = New-Object system.Windows.Forms.Label
+    $lblUser2.Text                 = "Enter UserID to copy access to:"
+    $lblUser2.location             = New-Object System.Drawing.Point(500,10)
+    $lblUser2.width                = 180
+
+    $txtT2User2                    = New-Object System.Windows.Forms.TextBox
+    $txtT2User2.location           = New-Object System.Drawing.Point(520,30)
+    $txtT2User2.width              = 120
+    $txtT2User2.height             = 35
+
+    $lstT2User2                    = New-Object System.Windows.Forms.ListBox      
+    $lstT2User2.location           = New-Object System.Drawing.Point(405,70) 
+    $lstT2User2.width              = 350
+    $lstT2User2.height             = 450
+    $lstT2User2.SelectionMode = "MultiExtended"
+
+    $lblInfo                    = New-Object system.Windows.Forms.Label
+    $lblInfo.Text               = "Select a group from the left side list, then use the buttons to add to the right side list."
+    $lblInfo.location           = New-Object System.Drawing.Point(180,55)
+    $lblInfo.width              = 430
+    #endregion TabPage2    -+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-
+
+#region TabPage3 - Change User Last Name
+$tabPage3                      = New-Object System.Windows.Forms.TabPage
+$tabPage3.Text                 = "Change User Last Name"
+
+$lblT3SamAccountName           = New-Object System.Windows.Forms.Label
+$lblT3SamAccountName.Text      = "Enter SamAccountName:"
+$lblT3SamAccountName.location  = New-Object System.Drawing.Point(10,10)
+$lblT3SamAccountName.width     = 150
+
+$txtT3SamAccountName           = New-Object System.Windows.Forms.TextBox
+$txtT3SamAccountName.location  = New-Object System.Drawing.Point(10,30)
+$txtT3SamAccountName.width     = 200
+
+$lblT3NewLastName              = New-Object System.Windows.Forms.Label
+$lblT3NewLastName.Text         = "Enter New Last Name:"
+$lblT3NewLastName.location     = New-Object System.Drawing.Point(10,70)
+$lblT3NewLastName.width        = 150
+
+$txtT3NewLastName              = New-Object System.Windows.Forms.TextBox
+$txtT3NewLastName.location     = New-Object System.Drawing.Point(10,90)
+$txtT3NewLastName.width        = 200
+
+$btnT3Execute                  = New-Object System.Windows.Forms.Button
+$btnT3Execute.text             = "Execute"
+$btnT3Execute.width            = 100
+$btnT3Execute.height           = 35
+$btnT3Execute.location         = New-Object System.Drawing.Point(10,130)
+
+$lblT3Result                   = New-Object System.Windows.Forms.Label
+$lblT3Result.Text              = ""
+$lblT3Result.location          = New-Object System.Drawing.Point(10,180)
+$lblT3Result.width             = 400
+
+$tabPage3.Controls.AddRange(@($lblT3SamAccountName, $txtT3SamAccountName, $lblT3NewLastName, $txtT3NewLastName, $btnT3Execute, $lblT3Result))
+#endregion TabPage3
+
+# Add TabPage3 to the TabControl
+$tabControl1.Controls.Add($tabPage3)
+
+# Event Handler for button click on TabPage3
+$btnT3Execute.Add_Click({
+    $SamAccountName = $txtT3SamAccountName.Text
+    $NewLastName = $txtT3NewLastName.Text
+
+    if (-not $SamAccountName -or -not $NewLastName) {
+        $lblT3Result.Text = "Error: Both fields are required."
+        return
+    }
+
+    try {
+        # Verify Active Directory module is loaded
+        if (-not (Get-Module -ListAvailable ActiveDirectory)) {
+            $lblT3Result.Text = "Error: Active Directory module is not installed."
+            return
+        }
+
+        # Import Active Directory module
+        Import-Module ActiveDirectory -ErrorAction Stop
+
+        # Get the user object from Active Directory
+        $user = Get-ADUser -Filter {SamAccountName -eq $SamAccountName} -Properties Surname, DisplayName, UserPrincipalName
+        if (-not $user) {
+            $lblT3Result.Text = "Error: User not found in Active Directory."
+            return
+        }
+
+        # Update the user's last name
+        Set-ADUser -Identity $user.DistinguishedName -Surname $NewLastName
+
+        # Update DisplayName and UserPrincipalName
+        $NewDisplayName = $user.DisplayName -replace $user.Surname, $NewLastName
+        $NewUserPrincipalName = $user.UserPrincipalName -replace $user.Surname, $NewLastName
+        Set-ADUser -Identity $user.DistinguishedName -DisplayName $NewDisplayName -UserPrincipalName $NewUserPrincipalName
+
+        # Trigger Azure AD Connect sync
+        if (Get-Module -ListAvailable ADSync) {
+            Import-Module ADSync -ErrorAction Stop
+            Start-ADSyncSyncCycle -PolicyType Delta
+        }
+
+        $lblT3Result.Text = "Success: User's last name updated and synced with Entra ID."
+    } catch {
+        $lblT3Result.Text = "Error: $_"
+    }
+})
+
+#region TabPage4 - Unarchive Account
+$tabPage4                      = New-Object System.Windows.Forms.TabPage
+$tabPage4.Text                 = "Unarchive Account"
+
+$lblT4AccountName              = New-Object System.Windows.Forms.Label
+$lblT4AccountName.Text         = "Enter the account name to unarchive:"
+$lblT4AccountName.location     = New-Object System.Drawing.Point(10,10)
+$lblT4AccountName.width        = 300
+
+$txtT4AccountName              = New-Object System.Windows.Forms.TextBox
+$txtT4AccountName.location     = New-Object System.Drawing.Point(10,40)
+$txtT4AccountName.width        = 360
+
+$btnT4Unarchive                = New-Object System.Windows.Forms.Button
+$btnT4Unarchive.text           = "Unarchive"
+$btnT4Unarchive.width          = 100
+$btnT4Unarchive.height         = 35
+$btnT4Unarchive.location       = New-Object System.Drawing.Point(150,80)
+
+$lblT4Result                   = New-Object System.Windows.Forms.Label
+$lblT4Result.Text              = ""
+$lblT4Result.location          = New-Object System.Drawing.Point(10,130)
+$lblT4Result.width             = 400
+
+$tabPage4.Controls.AddRange(@($lblT4AccountName, $txtT4AccountName, $btnT4Unarchive, $lblT4Result))
+#endregion TabPage4
+
+# Add TabPage4 to the TabControl
+$tabControl1.Controls.Add($tabPage4)
+
+# Event Handler for button click on TabPage4
+$btnT4Unarchive.Add_Click({
+    $Account = $txtT4AccountName.Text
+
+    if (-not [string]::IsNullOrWhiteSpace($Account)) {
+        try {
+            # Get the user account
+            $User = Get-ADUser -Identity $Account -Properties Enabled, AccountExpirationDate
+
+            if ($User) {
+                # Enable the account if it is disabled
+                if (-not $User.Enabled) {
+                    Enable-ADAccount -Identity $Account
+                    $lblT4Result.Text = "Enabled account: $Account"
+                }
+
+                # Remove account expiration date if set
+                if ($User.AccountExpirationDate) {
+                    Set-ADUser -Identity $Account -AccountExpirationDate $null
+                    $lblT4Result.Text += "`nRemoved expiration date for account: $Account"
+                }
+
+                # Final success message
+                $lblT4Result.Text += "`nAccount '$Account' has been successfully unarchived."
+            } else {
+                $lblT4Result.Text = "Error: Account not found: $Account"
+            }
+        } catch {
+            $lblT4Result.Text = "Error: An error occurred: $_"
+        }
+    } else {
+        $lblT4Result.Text = "Error: Please enter a valid account name."
+    }
+})
+
+#region TabPage5 - Delete Computer from AD
+$tabPage5                      = New-Object System.Windows.Forms.TabPage
+$tabPage5.Text                 = "Delete Computer"
+
+$lblT5ComputerName             = New-Object System.Windows.Forms.Label
+$lblT5ComputerName.Text        = "Enter the computer name to delete from Active Directory:"
+$lblT5ComputerName.location    = New-Object System.Drawing.Point(10,10)
+$lblT5ComputerName.width       = 400
+
+$txtT5ComputerName             = New-Object System.Windows.Forms.TextBox
+$txtT5ComputerName.location    = New-Object System.Drawing.Point(10,40)
+$txtT5ComputerName.width       = 360
+
+$btnT5Delete                   = New-Object System.Windows.Forms.Button
+$btnT5Delete.text              = "Delete"
+$btnT5Delete.width             = 100
+$btnT5Delete.height            = 35
+$btnT5Delete.location          = New-Object System.Drawing.Point(150,80)
+
+$lblT5Result                   = New-Object System.Windows.Forms.Label
+$lblT5Result.Text              = ""
+$lblT5Result.location          = New-Object System.Drawing.Point(10,130)
+$lblT5Result.width             = 400
+
+$tabPage5.Controls.AddRange(@($lblT5ComputerName, $txtT5ComputerName, $btnT5Delete, $lblT5Result))
+#endregion TabPage5
+
+# Add TabPage5 to the TabControl
+$tabControl1.Controls.Add($tabPage5)
+
+# Event Handler for button click on TabPage5
+$btnT5Delete.Add_Click({
+    $ComputerName = $txtT5ComputerName.Text
+
+    if (-not [string]::IsNullOrWhiteSpace($ComputerName)) {
+        $Confirmation = [System.Windows.Forms.MessageBox]::Show("Are you sure you want to delete the computer '$ComputerName'?", "Confirm Deletion", [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Warning)
+
+        if ($Confirmation -eq [System.Windows.Forms.DialogResult]::Yes) {
+            try {
+                # Attempt to remove the computer object
+                Remove-ADComputer -Identity $ComputerName -Confirm:$false
+                $lblT5Result.Text = "Computer '$ComputerName' has been successfully deleted from Active Directory."
+                $lblT5Result.ForeColor = 'Green'
+            } catch {
+                # Handle errors
+                $lblT5Result.Text = "An error occurred: $_"
+                $lblT5Result.ForeColor = 'Red'
+            }
+        } else {
+            $lblT5Result.Text = "Operation canceled."
+            $lblT5Result.ForeColor = 'Yellow'
+        }
+    } else {
+        $lblT5Result.Text = "Error: Please enter a valid computer name."
+        $lblT5Result.ForeColor = 'Red'
+    }
+})` 
+#region TabPage6 - Remove User from All Groups
+$tabPage6                      = New-Object System.Windows.Forms.TabPage
+$tabPage6.Text                 = "Remove User Groups"
+
+$lblT6Username                 = New-Object System.Windows.Forms.Label
+$lblT6Username.Text            = "Enter Username:"
+$lblT6Username.AutoSize        = $true
+$lblT6Username.Location        = New-Object System.Drawing.Point(10, 20)
+
+$txtT6Username                 = New-Object System.Windows.Forms.TextBox
+$txtT6Username.Location        = New-Object System.Drawing.Point(120, 20)
+$txtT6Username.Size            = New-Object System.Drawing.Size(200, 20)
+
+$btnT6RemoveGroups             = New-Object System.Windows.Forms.Button
+$btnT6RemoveGroups.Text        = "Remove Groups"
+$btnT6RemoveGroups.Location    = New-Object System.Drawing.Point(120, 60)
+$btnT6RemoveGroups.Size        = New-Object System.Drawing.Size(100, 30)
+
+$lblT6Result                   = New-Object System.Windows.Forms.Label
+$lblT6Result.Text              = ""
+$lblT6Result.AutoSize          = $true
+$lblT6Result.Location          = New-Object System.Drawing.Point(10, 110)
+
+$tabPage6.Controls.AddRange(@($lblT6Username, $txtT6Username, $btnT6RemoveGroups, $lblT6Result))
+#endregion TabPage6
+
+# Add TabPage6 to the TabControl
+$tabControl1.Controls.Add($tabPage6)
+
+# Event Handler for button click on TabPage6
+$btnT6RemoveGroups.Add_Click({
+    $user = $txtT6Username.Text
+    if (-not [string]::IsNullOrWhiteSpace($user)) {
+        try {
+            $groups = Get-ADUser -Identity $user -Property MemberOf | Select-Object -ExpandProperty MemberOf
+            foreach ($group in $groups) {
+                Remove-ADGroupMember -Identity $group -Members $user -Confirm:$false
+            }
+            $lblT6Result.Text = "User '$user' has been removed from all groups."
+            $lblT6Result.ForeColor = 'Green'
+        } catch {
+            $lblT6Result.Text = "An error occurred: $_"
+            $lblT6Result.ForeColor = 'Red'
+        }
+    } else {
+        $lblT6Result.Text = "Please enter a valid username."
+        $lblT6Result.ForeColor = 'Red'
+    }
+})
+#region TabPage7 - Assign Teams Phone Number
+$tabPage7                      = New-Object System.Windows.Forms.TabPage
+$tabPage7.Text                 = "Assign Teams Number"
+
+$lblT7Email                    = New-Object System.Windows.Forms.Label
+$lblT7Email.Text               = "User's Email Address:"
+$lblT7Email.Location           = New-Object System.Drawing.Point(10, 20)
+$lblT7Email.Size               = New-Object System.Drawing.Size(150, 20)
+
+$txtT7Email                    = New-Object System.Windows.Forms.TextBox
+$txtT7Email.Location           = New-Object System.Drawing.Point(170, 20)
+$txtT7Email.Size               = New-Object System.Drawing.Size(300, 20)
+
+$lblT7Number                   = New-Object System.Windows.Forms.Label
+$lblT7Number.Text              = "Phone Number to Assign:"
+$lblT7Number.Location          = New-Object System.Drawing.Point(10, 60)
+$lblT7Number.Size              = New-Object System.Drawing.Size(150, 20)
+
+$txtT7Number                   = New-Object System.Windows.Forms.TextBox
+$txtT7Number.Location          = New-Object System.Drawing.Point(170, 60)
+$txtT7Number.Size              = New-Object System.Drawing.Size(300, 20)
+
+$btnT7Assign                   = New-Object System.Windows.Forms.Button
+$btnT7Assign.Text              = "Assign Number"
+$btnT7Assign.Location          = New-Object System.Drawing.Point(200, 100)
+
+$lblT7Status                   = New-Object System.Windows.Forms.Label
+$lblT7Status.Location          = New-Object System.Drawing.Point(10, 140)
+$lblT7Status.Size              = New-Object System.Drawing.Size(460, 120)
+
+$tabPage7.Controls.AddRange(@($lblT7Email, $txtT7Email, $lblT7Number, $txtT7Number, $btnT7Assign, $lblT7Status))
+#endregion TabPage7
+
+# Add TabPage7 to the TabControl
+$tabControl1.Controls.Add($tabPage7)
+
+# Event Handler for button click on TabPage7
+$btnT7Assign.Add_Click({
+    $email = $txtT7Email.Text
+    $number = $txtT7Number.Text
+
+    if (-not $email) {
+        $lblT7Status.Text = "Error: Email is required."
+        return
+    }
+    if (-not $number) {
+        $lblT7Status.Text = "Error: Phone number is required."
+        return
+    }
+
+    $lblT7Status.Text = "Connecting to Microsoft Teams..."
+    try {
+        Connect-MicrosoftTeams
+        $lblT7Status.Text = "Connected to Microsoft Teams."
+    } catch {
+        $lblT7Status.Text = "Error: Unable to connect to Microsoft Teams. $($_.Exception.Message)"
+        return
+    }
+
+    $lblT7Status.Text = "Assigning $number to $email..."
+    try {
+        Set-VWTeamsPhoneNumber -Identity $email -Number $number
+        $lblT7Status.Text = "Success: Assigned $number to $email."
+    } catch {
+        if ($_.Exception.Message -like "*Access Denied*") {
+            $lblT7Status.Text = "Error: Access Denied. Ensure you have the necessary permissions to assign phone numbers."
+        } elseif ($_.Exception.Message -like "*already assigned*") {
+            $lblT7Status.Text = "The number $number is already assigned. Searching Active Directory..."
+            try {
+                $user = Get-ADUser -Filter {TelephoneNumber -eq $number} -Properties TelephoneNumber
+                if ($user) {
+                    $lblT7Status.Text = "The number $number is assigned to user: $($user.SamAccountName) ($($user.Name))."
+                } else {
+                    $lblT7Status.Text = "No user found in Active Directory with the number $number."
+                }
+            } catch {
+                $lblT7Status.Text = "Error: Unable to search Active Directory. $($_.Exception.Message)"
+            }
+
+            $lblT7Status.Text += "`nTo remove an external phone number from a user, follow these steps:"
+            $lblT7Status.Text += "`n1. Log on to ICT Tools remote desktop session."
+            $lblT7Status.Text += "`n2. Run PowerShell with your admin account."
+            $lblT7Status.Text += "`n3. Launch Microsoft Teams module: Connect-MicrosoftTeams."
+            $lblT7Status.Text += "`n   If not installed, run: Install-Module vwteams -Scope CurrentUser."
+            $lblT7Status.Text += "`n4. Run the following command to clear the phone number:"
+            $lblT7Status.Text += "`n   Clear-VWTeamsPhoneNumber -Identity <email>"
+            $lblT7Status.Text += "`n   Where <email> is the user’s email address the number is assigned to."
+            $lblT7Status.Text += "`nExample: Clear-VWTeamsPhoneNumber -Identity ""
+        } else {
+            $lblT7Status.Text = "Error: An unexpected error occurred. $($_.Exception.Message)"
+        }
+    }
+
+    $lblT7Status.Text += "`nWaiting for 10 seconds to ensure all operations are completed..."
+    Start-Sleep -Seconds 10
+    $lblT7Status.Text += "`nScript execution completed."
+})
+
+    #region UI Stuff ~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-
+    #Adding UI Elements to the Form/Tab Page
+    $frmMain.Controls.AddRange(@($tabControl1,$lblTitle))
+    $frmOutput.controls.AddRange(@($btnSaveToFile,$btnClose,$grvwResult))
+    $tabControl1.Controls.AddRange(@($tabPage1,$tabPage2))
+    $tabPage1.Controls.AddRange(@($btnT1EnterManual,$btnT1LoadGroups,$btnT1Reset,$lstT1Groups,$txtT1Users,$lblT1SpecifyUsers,$btnT1AddToList,$lstT1Users,$btnT1AddGroups,$btnT1LoadFromFile))
+    $tabPage2.Controls.AddRange(@($btnT2Start,$btnT2Add,$btnT2Remove,$txtT2User1,$txtT2User2,$lblT2User1,$lblUser2,$lstT2User1,$lstT2User2,$btnT2LoadGroups,$lblInfo,$btnT2Clear))
+    # Event Handler for button clicks on $tabPage1
+
+    $btnT1EnterManual.Add_Click({ AddGroupsManual })
+    $btnT1LoadGroups.Add_Click({ AddGroupsFromUser })
+    $btnT1LoadFromFile.Add_Click({ AddGroupsFromFile })
+    $btnT1Reset.Add_Click({ ResetGroupList })
+    $btnT1AddToList.Add_Click({ AddUserToList($txtT1Users.Text) })
+    $btnT1AddGroups.Add_Click({ AddGroupsToAccount })
+    $btnSaveToFile.Add_Click({ SaveOutputToFile })
+    $btnClose.Add_Click({ CloseForm($frmOutput) })
+    # Event Handler for button clicks on $tabPage2
+
+    $btnT2Start.Add_Click({ MirrorGroups })
+    $btnT2Add.Add_Click({ AddToMirrorList })
+    $btnT2Remove.Add_Click({ RemoveFromMirrorList })
+    $btnT2LoadGroups.Add_Click({ PopulateT2User1List })
+    $btnT2Clear.Add_Click({ ClearT2Lists })
+
+    #endregion UI Stuff ~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-
+    #region Functions -~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-
+    function PopulateT2User1List
+    {
+        $objType = "user"
+
+        if(Validate($txtT2User1.Text))
+        {
+            #Clearing the text box before we start
+            $lstT2User1.Items.Clear()
+                    
+            #Gets AD Groups for selected user, loops through and loads into the list boxes
+            Get-ADPrincipalGroupMembership $txtT2User1.Text | foreach-object { 
+                if($_.Name.StartsWith("Prod_"))
+                {
+                    #Skip certain roles that we shouldn't be modifying'
+                }
+                elseif($_.Name.StartsWith("BOBJ_"))
+                {
+                    #Skip certain roles that we shouldn't be modifying'
+                }
+                else
+                {
+                    $lstT2User1.Items.Add($_.Name)
+                }
+            }        
+        }
+        else
+        {
+            [System.Windows.MessageBox]::Show('User not found','Invalid User','OK','Error')
+        }
+    }
+
+    <# This function adds all groups in $lstT2User2 to the user in $txtT2User2 #>
+    function MirrorGroups 
+    {
+        $objType = "user"
+        if(Validate($txtT2User2.Text))
+        {
+            if($lstT2User2.Items.Count -gt 0)
+            {
+                $txtT2User1.Enabled = $false
+                $txtT2User2.Enabled = $false
+                $Cred = Get-Credential -UserName "xx$env:UserName" -Message 'Enter your xxAdmin Credentials'
+                ClearDataTable
+                $user = $txtT2User2.Text
+
+                foreach($group in $lstT2User2.Items)
+                {
+                    $Success = "True"
+                    $Reason = ""
+            
+                    try
+                    {
+                        Add-ADGroupMember -Credential $Cred -Identity $group -Members $user
+                        WriteToLogFile("User: $user added to Group: $group")
+                        $txtT2User1.Enabled = $true
+                        $txtT2User2.Enabled = $true
+                    }
+                    catch
+                    {
+                        $Success = "False"
+                        $Reason = $_.Exception.Message
+                        WriteToLogFile("Error - User: $user could not be added to Group: $group. Error code: $Reason")
+                    }
+                    finally
+                    {
+                        $dataTable.Rows.add($user,$group,$Success,$Reason)
+                    }        
+                }
+                #Displays a new Form with the output, and options to save to file
+                [void]$frmOutput.ShowDialog()
+            }
+            else
+            {
+                [System.Windows.MessageBox]::Show('No groups selected to mirror...','Invalid Selection','OK','Error')
+            }
+        }
+        else
+        {
+            [System.Windows.MessageBox]::Show('Invalid user selected...','Invalid User','OK','Error')
+        }    
+    }
+
+    #Moves the selected item from $lstT2User1 to $lstT2User2
+    function AddToMirrorList
+    {
+        if($lstT2User1.SelectedItems.Count -gt 0)
+        {
+            foreach($item in $lstT2User1.SelectedItems)
+            {
+                $lstT2User2.Items.Add($item)
+            }
+            while($lstT2User1.SelectedItems)
+            {            
+                $lstT2User1.Items.Remove($lstT2User1.SelectedItems[0])
+            }
+        }
+        else
+        {
+            [System.Windows.MessageBox]::Show('You must select at least 1 item in the list before attempting to move anything.','Invalid Selection','OK','Error')
+        }    
+    }
+
+    #Moves the selected item from $lstT2User2 to $lstT2User1
+    function RemoveFromMirrorList
+    {
+        if($lstT2User2.SelectedItems.Count -gt 0)
+        {
+            foreach($item in $lstT2User2.SelectedItems)
+            {
+                $lstT2User1.Items.Add($item)
+            }
+            while($lstT2User2.SelectedItems)
+            {            
+                $lstT2User2.Items.Remove($lstT2User2.SelectedItems[0])
+            }
+        }
+        else
+        {
+            [System.Windows.MessageBox]::Show('You must select at least 1 item in the list before attempting to move anything.','Invalid Selection','OK','Error')
+        }    
+    }
+
+    #Adds AD groups to the listbox based on user input
+    function AddGroupsManual
+    {
+        #Dialogue box prompting user to enter an AD group
+        $title = 'Group Entry'
+        $msg   = 'Enter the group name:'
+        $text  = [Microsoft.VisualBasic.Interaction]::InputBox($msg, $title)
+        $objType = "group"
+
+        #Validate the group, then add it
+        if(Validate($text))
+        {
+            if($text.StartsWith("Prod_"))
+            {
+                #Skip certain roles that we shouldn't be modifying'
+            }
+            elseif($text.StartsWith("BOBJ_"))
+            {
+                #Skip certain roles that we shouldn't be modifying'
+            }
+            else
+            {
+                $lstT1Groups.Items.Add($text)
+            }
+        }
+        else
+        {
+            [System.Windows.MessageBox]::Show('Group not found','Invalid Group','OK','Error')
+        }
+    }
+
+    #Adds AD groups based on user input
+    function AddGroupsFromUser
+    {
+        $title = 'User Entry'
+        $msg   = 'Enter the UserID from AD:'
+        $text  = [Microsoft.VisualBasic.Interaction]::InputBox($msg, $title)
+        $objType = "user"
+
+        if(Validate($text))
+        {
+            ResetGroupList
+            Get-ADPrincipalGroupMembership $text | foreach-object {
+                if($_.Name.StartsWith("Prod_"))
+                {
+                    #Skip certain roles that we shouldn't be modifying'
+                }
+                elseif($_.Name.StartsWith("BOBJ_"))
+                {
+                    #Skip certain roles that we shouldn't be modifying'
+                }
+                else
+                {
+                    $lstT1Groups.Items.Add($_.Name)
+                }
+            }
+        }
+        else
+        {
+            [System.Windows.MessageBox]::Show('User not found','Invalid User','OK','Error')
+        }
+    }
+
+    #Prompts to choose a file, then reads from that file
+    function AddGroupsFromFile
+    {
+        try
+        {
+            ResetGroupList
+            $initDir = "C:\Users\" + $env:UserName
+            $openSaveDialog = New-Object System.Windows.Forms.OpenFileDialog
+            $openSaveDialog.filter = 'Text Files (*.txt)|*.txt'
+            $openSaveDialog.InitialDirectory = $initDir
+            $openSaveDialog.ShowDialog()
+            $path = $openSaveDialog.FileName
+            $objType = "group"
+            #Stores the file contents in an array
+            $fileContent = Get-Content -Path $path
+        
+            #Loop through each line of the array and adds to the list
+            for($i=0;$i -lt $fileContent.Length;$i++)
+            {
+                if(Validate($fileContent[$i]))
+                {
+                    if($fileContent[$i].StartsWith("Prod_"))
+                    {
+                        #Skip certain roles that we shouldn't be modifying'
+                    }
+                    elseif($fileContent[$i].StartsWith("BOBJ_"))
+                    {
+                        #Skip certain roles that we shouldn't be modifying'
+                    }
+                    else
+                    {
+                        $lstT1Groups.Items.Add($fileContent[$i])
+                    }
+                }
+                else
+                {
+                    [System.Windows.MessageBox]::Show('One or more groups were invalid and could not be loaded.','Invalid Group','OK','Error')
+                    Write-Host "Group not found: " + $fileContent[$i]
+                }    
+            }
+        }    
+        catch
+        {
+            Write-Host $_.Exception.GetType().Name
+            [System.Windows.MessageBox]::Show('You must choose a file to load.','Invalid File','OK','Error')
+        }
+    }
+
+    #Adds the specified user to the list
+    function AddUserToList($userToAdd)
+    {
+        $objType = "user"
+
+        #Checking if the user is a valid AD User Account
+        if(Validate($userToAdd))
+        {
+            if($lstT1Users.Items.Contains($userToAdd))
+            {
+                [System.Windows.MessageBox]::Show('User already exists in the list.','User in List','OK','Error')                
+            }
+            else
+            {
+                $lstT1Users.Items.Add($userToAdd)
+                $txtT1Users.Text = ""        
+            }    
+        }        
+        else
+        {
+            [System.Windows.MessageBox]::Show('User not found','Invalid User','OK','Error')
+        }
+    }
+
+    #Checks if the passed object exists in AD
+    function Validate($thingToAdd)
+    {
+        if($objType -eq "user")
+        {
+            try 
+            {
+                [bool] (Get-ADUser -Identity $thingToAdd) 
+            }
+            catch 
+            {
+                Write-Warning -Message "User does not exist."
+            }
+        }
+        elseif($objType -eq "group")
+        {
+            try 
+            {
+                [bool] (Get-ADGroup -Identity $thingToAdd) 
+            }
+            catch 
+            {
+                Write-Warning -Message "Group does not exist."
+            }
+        }    
+        else{
+            Write-Host "nooope"
+        }
+    }
+
+    <#Test Data 
+    $lstT1Groups.Items.Add("Nandos Now")
+    $lstT1Groups.Items.Add("Right-Azure-Webex-Users")
+    $lstT1Users.Items.Add("lawrenk0")#>
+
+    #Adds all the groups from $lstT1Groups to each user in $lstT1Users
+    function AddGroupsToAccount
+    {            
+        #Making sure that there is a user selected before we try add the groups to them
+        if($lstT1Users.Items.Count -gt 0)
+        {
+            $Cred = Get-Credential -UserName "xx$env:UserName" -Message 'Enter your xxAdmin Credentials'
+            ClearDataTable
+
+            foreach($user in $lstT1Users.Items)
+            {
+                $Success = "True"
+                $Reason = ""
+
+                for($i = 0;$i -lt ($lstT1Groups.Items.Count);$i++)
+                {        
+                    $group = $lstT1Groups.Items[$i]
+                    try
+                    {
+                        Add-ADGroupMember -Credential $Cred -Identity $group -Members $user
+                        WriteToLogFile("User: $user added to Group: $group")
+                    }
+                    catch
+                    {
+                        $Success = "False"
+                        $Reason = $_.Exception.Message
+                        WriteToLogFile("Error - User: $user could not be added to Group: $group. Error code: $Reason")
+                    }
+                    finally
+                    {
+                        $dataTable.Rows.add($user,$group,$Success,$Reason)
+                    }
+                }        
+            }
+            #Displays a new Form with the output, and options to save to file
+            [void]$frmOutput.ShowDialog()
+        }
+        else
+        {
+            [System.Windows.MessageBox]::Show('No users selected. ','Invalid User','OK','Warning')
+        }
+    }
+
+    #Optional step to save the groups added to a file
+    function SaveOutputToFile
+    {
+        try
+        {
+            $initDir = "C:\Users\" + $env:UserName
+            Write-Host $initDir
+            $fileSaveDialog = New-Object System.Windows.Forms.SaveFileDialog
+            $fileSaveDialog.filter = "CSV (Comma delimited) (*.csv*)| *.csv*"
+            $fileSaveDialog.InitialDirectory = $initDir
+            $fileSaveDialog.ShowDialog()
+            $path = $fileSaveDialog.FileName
+            $grvwResult.Rows | Select-Object -ExpandProperty DataBoundItem | Export-Csv "$path.csv" -NoTypeInformation -Encoding UTF8 -Force
+            CloseForm($frmOutput)
+        }
+        catch
+        {
+            [System.Windows.MessageBox]::Show('The path you have selected is incorrect','Invalid Path','OK','Error')
+        }
+    }
+
+    #Closes the passed form
+    function CloseForm($frmMainToClose)
+    {
+        $frmMainToClose.Close()
+    }
+
+    #Clears $lstT1Groups
+    function ResetGroupList
+    {
+        $lstT1Groups.Items.Clear()
+    }
+
+    <#Clears $dataTable which is the DataSource for $grvwResult. 
+    We want to clear the data from the Grid View before we run it again or we will have duplicate results from different functions of this script. #>
+    function ClearDataTable
+    {
+        for($i=0;$i -lt $dataTable.Rows.Count;$i++)
+        {
+            $dataTable.Rows[$i].Delete()
+        }
+    }
+
+    #Writing to log file for record keeping
+    function WriteToLogFile($text)
+    {
+        $logDate = Get-Date -Format "d/mm/yyyy HH:mm"
+        $logText = "$logdate - $text"
+        Add-Content $logFileLocation -Value $logText
+    }
+
+    #Group WIP - Not yet implemented
+    # The objective was to restrict certain OU groups but as we don't have access to edit, it's not really required
+    function SkipRestrictedGroups($group)
+    {
+        $GroupsOU = 'OU=Security Groups,OU=nxdh Users,DC=corpnet,DC=nxdh.com,DC=com,DC=au'
+
+        #Ignore groups
+        #DistinguishedName : CN=Right-VPN-RA-NPS,OU=Security Groups,OU=nxdh Users,DC=corpnet,DC=nxdh.com,DC=com,DC=au
+        #DistinguishedName : CN=Right-AD-BDM_Admin,OU=Right Based Security Groups,OU=Admin Users and Groups,DC=corpnet,DC=nxdh.com,DC=com,DC=au
+        #DistinguishedName : CN=BMS_Admin,OU=EBI,OU=Admin Users and Groups,DC=corpnet,DC=nxdh.com,DC=com,DC=au
+        #DistinguishedName : CN=Right-WS-Administrators-APPSTACKDC1,OU=LocalAdminGroups,OU=nxdh Users,DC=corpnet,DC=nxdh.com,DC=com,DC=au
+        #DistinguishedName : CN=Prod_ABAP_ERP_HR_SUPPORT,OU=PROD,OU=SAP Roles,OU=Admin Users and Groups,DC=corpnet,DC=nxdh.com,DC=com,DC=au
+        $groupToCheck = Get-ADGroup -Identity $group -Properties DistinguishedName 
+
+        Switch($groupToCheck)
+        {
+            "CN=$group,OU=Right Based Security Groups,OU=Admin Users and Groups,DC=corpnet,DC=nxdh.com,DC=com,DC=au"
+            {
+                Write-Host "Right Based Security Groups"
+                $skipGroup = "True"
+            }
+            "CN=$group,OU=EBI,OU=Admin Users and Groups,DC=corpnet,DC=nxdh.com,DC=com,DC=au"
+            {
+                Write-Host "EBI"
+                $skipGroup = "True"
+            }
+            "CN=$group,OU=Security Groups,OU=nxdh Users,DC=corpnet,DC=nxdh.com,DC=com,DC=au"
+            {
+                Write-Host "nxdh Users"
+                $skipGroup = "True"
+            }
+            "CN=$group,OU=LocalAdminGroups,OU=nxdh Users,DC=corpnet,DC=nxdh.com,DC=com,DC=au"
+            {
+                Write-Host "Local Admin Groups"
+                $skipGroup = "True"
+            }
+            "CN=$group,OU=PROD,OU=SAP Roles,OU=Admin Users and Groups,DC=corpnet,DC=nxdh.com,DC=com,DC=au"
+            {
+                Write-Host "SAP Groups"
+                $skipGroup = "True"
+            }
+        }    
+    }
+
+    function ClearT2Lists
+    {
+        $lstT2User1.Items.Clear()
+        $lstT2User2.Items.Clear()
+        $txtT2User1.Text ="" 
+        $txtT2User2.Text ="" 
+    }
+
+    [void]$frmMain.ShowDialog()
+
+}
+
+
+
+#Checks if the application loaded successfully, and if so calls the function to load the form
+if((OnApplicationLoad) -eq $true)
+{
+    MirrorADAccount | Out-Null
+    OnApplicationExit
+}
+else
+{
+    Write-Host "Error: The application did not load successfully."
+    [System.Windows.MessageBox]::Show('The application did not load successfully.','Application Load Error','OK','Error')
+}
+#End of Script
