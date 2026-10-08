@@ -31,7 +31,7 @@ Run with an account that has the rights for the operation you are performing. Te
 
 ## Related
 
-- [Network Optimisation & Security Enhancement](https://github.com/Dstanfield-Creator/projects/tree/master/infrastructure/network-security-enhancement) and [Cloud Services & VM Management](https://github.com/Dstanfield-Creator/projects/tree/master/infrastructure/cloud-vm-management), the roles this tooling came out of.
+- [Network Optimisation & Security Enhancement](https://github.com/Dstanfield-Creator/network/tree/main/case-studies/network-security-enhancement) and [Cloud Services & VM Management](https://github.com/Dstanfield-Creator/cloud-infrastructure/tree/master/case-studies/cloud-vm-management), the roles this tooling came out of.
 - [general-it](https://github.com/Dstanfield-Creator/general-it) for the onboarding/offboarding checklists these scripts support.
 
 ## Disclaimer
